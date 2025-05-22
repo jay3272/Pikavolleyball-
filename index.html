@@ -1,0 +1,661 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>皮卡丘排球 with GPT</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background: linear-gradient(135deg, #87CEEB 0%, #98FB98 100%);
+            font-family: 'Arial', sans-serif;
+            overflow: hidden;
+        }
+        
+        #gameContainer {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        #gameCanvas {
+            background: linear-gradient(to bottom, #87CEEB 0%, #90EE90 70%, #32CD32 100%);
+            border: 3px solid #8B4513;
+            flex: 1;
+        }
+        
+        #chatContainer {
+            background: rgba(0, 0, 0, 0.8);
+            color: white;
+            height: 120px;
+            padding: 10px;
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+        
+        #chatMessages {
+            flex: 1;
+            overflow-y: auto;
+            font-size: 12px;
+            background: rgba(255, 255, 255, 0.1);
+            padding: 5px;
+            border-radius: 5px;
+        }
+        
+        #chatInput {
+            display: flex;
+            gap: 5px;
+        }
+        
+        #chatInput input {
+            flex: 1;
+            padding: 5px;
+            border: none;
+            border-radius: 3px;
+        }
+        
+        #chatInput button {
+            padding: 5px 10px;
+            background: #FFD700;
+            border: none;
+            border-radius: 3px;
+            cursor: pointer;
+            font-weight: bold;
+        }
+        
+        #gameInfo {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            color: white;
+            font-size: 18px;
+            font-weight: bold;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
+            z-index: 10;
+        }
+        
+        #controls {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            color: white;
+            font-size: 12px;
+            text-shadow: 1px 1px 2px rgba(0,0,0,0.5);
+            z-index: 10;
+        }
+        
+        #touchControls {
+            position: absolute;
+            bottom: 140px;
+            left: 0;
+            right: 0;
+            display: flex;
+            justify-content: space-between;
+            padding: 20px;
+            z-index: 10;
+        }
+        
+        .touchButton {
+            background: rgba(255, 215, 0, 0.2);
+            border: 2px solid rgba(255, 215, 0, 0.4);
+            border-radius: 50%;
+            width: 60px;
+            height: 60px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 18px;
+            font-weight: bold;
+            color: rgba(255, 255, 255, 0.8);
+            touch-action: manipulation;
+            user-select: none;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.3);
+        }
+        
+        .touchButton:active {
+            background: rgba(255, 215, 0, 0.5);
+            transform: scale(0.95);
+        }
+        
+        .controlGroup {
+            display: flex;
+            gap: 15px;
+            align-items: center;
+        }
+        
+        #jumpAttackBtn {
+            width: 80px;
+            height: 80px;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <div id="gameContainer">
+        <div id="gameInfo">
+            <div>玩家: <span id="playerScore">0</span> | AI: <span id="aiScore">0</span></div>
+        </div>
+        
+        <div id="controls">
+            <div>觸控操作 | 鍵盤：A/D - 移動, W - 跳躍, 空白鍵 - 攻擊</div>
+        </div>
+        
+        <canvas id="gameCanvas"></canvas>
+        
+        <div id="touchControls">
+            <div class="controlGroup">
+                <button class="touchButton" id="leftBtn">←</button>
+                <button class="touchButton" id="rightBtn">→</button>
+            </div>
+            <div class="controlGroup">
+                <button class="touchButton" id="jumpAttackBtn">跳躍<br>攻擊</button>
+            </div>
+        </div>
+        
+        <div id="chatContainer">
+            <div id="chatMessages"></div>
+            <div id="chatInput">
+                <input type="text" id="messageInput" placeholder="和皮卡丘聊天...">
+                <button onclick="sendMessage()">發送</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        
+        // 設置畫布大小
+        function resizeCanvas() {
+            canvas.width = Math.max(window.innerWidth, 1000); // 最小寬度1000px
+            canvas.height = Math.max(window.innerHeight - 200, 600); // 最小高度600px
+        }
+        resizeCanvas();
+        window.addEventListener('resize', resizeCanvas);
+        
+        // 遊戲狀態
+        let gameState = {
+            playerScore: 0,
+            aiScore: 0,
+            gameRunning: true
+        };
+        
+        // 物理常數
+        const GRAVITY = 0.8;
+        const FRICTION = 0.9;
+        const BOUNCE = 0.7;
+        
+        // 皮卡丘類別
+        class Pikachu {
+            constructor(x, y, isPlayer = true) {
+                this.x = x;
+                this.y = y;
+                this.vx = 0;
+                this.vy = 0;
+                this.width = 60;
+                this.height = 60;
+                this.onGround = false;
+                this.isPlayer = isPlayer;
+                this.facing = isPlayer ? 1 : -1;
+                this.animFrame = 0;
+                this.isJumping = false;
+            }
+            
+            update() {
+                // 重力
+                this.vy += GRAVITY;
+                
+                // 更新位置
+                this.x += this.vx;
+                this.y += this.vy;
+                
+                // 摩擦力
+                this.vx *= FRICTION;
+                
+                // 邊界檢查
+                if (this.x < 0) this.x = 0;
+                if (this.x > canvas.width - this.width) this.x = canvas.width - this.width;
+                
+                // 地面碰撞
+                const groundY = canvas.height - 20;
+                if (this.y + this.height > groundY) {
+                    this.y = groundY - this.height;
+                    this.vy = 0;
+                    this.onGround = true;
+                    this.isJumping = false;
+                } else {
+                    this.onGround = false;
+                }
+                
+                // 網子碰撞 - 防止角色穿越，限制在各自半場
+                const netX = canvas.width / 2 - 5;
+                const netWidth = 20;
+                const netHeight = 150; // 增加網子高度
+                const netTop = canvas.height - netHeight - 20;
+                
+                // 檢查是否與網子碰撞
+                if (this.x < netX + netWidth && this.x + this.width > netX &&
+                    this.y + this.height > netTop) {
+                    
+                    // 玩家(左側)不能超過網子
+                    if (this.isPlayer) {
+                        this.x = netX - this.width;
+                        if (this.vx > 0) this.vx = 0;
+                    } 
+                    // AI(右側)不能超過網子
+                    else {
+                        this.x = netX + netWidth;
+                        if (this.vx < 0) this.vx = 0;
+                    }
+                }
+                
+                // 額外的半場限制
+                if (this.isPlayer && this.x > netX - this.width) {
+                    this.x = netX - this.width;
+                    this.vx = Math.min(this.vx, 0);
+                }
+                if (!this.isPlayer && this.x < netX + netWidth) {
+                    this.x = netX + netWidth;
+                    this.vx = Math.max(this.vx, 0);
+                }
+                
+                this.animFrame += 0.2;
+            }
+            
+            jump() {
+                if (this.onGround) {
+                    this.vy = -18;
+                    this.isJumping = true;
+                }
+            }
+            
+            moveLeft() {
+                this.vx = Math.max(this.vx - 1, -8);
+                this.facing = -1;
+            }
+            
+            moveRight() {
+                this.vx = Math.min(this.vx + 1, 8);
+                this.facing = 1;
+            }
+            
+            attack() {
+                const ballDistance = Math.sqrt(
+                    Math.pow(ball.x - this.x, 2) + Math.pow(ball.y - this.y, 2)
+                );
+                
+                if (ballDistance < 80) {
+                    const dx = ball.x - this.x;
+                    const dy = ball.y - this.y;
+                    const force = 12;
+                    
+                    ball.vx = (dx / ballDistance) * force;
+                    ball.vy = (dy / ballDistance) * force - 2;
+                    
+                    // 添加一些隨機性
+                    ball.vx += (Math.random() - 0.5) * 4;
+                    ball.vy += (Math.random() - 0.5) * 2;
+                }
+            }
+            
+            draw() {
+                ctx.save();
+                ctx.translate(this.x + this.width/2, this.y + this.height/2);
+                ctx.scale(this.facing, 1);
+                
+                // 皮卡丘身體（黃色）
+                ctx.fillStyle = '#FFD700';
+                ctx.fillRect(-this.width/2, -this.height/2, this.width, this.height * 0.8);
+                
+                // 皮卡丘頭部
+                ctx.beginPath();
+                ctx.arc(0, -this.height/3, this.width/2.5, 0, Math.PI * 2);
+                ctx.fill();
+                
+                // 耳朵
+                ctx.fillStyle = '#FFD700';
+                ctx.beginPath();
+                ctx.ellipse(-15, -this.height/2, 8, 20, -0.3, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.beginPath();
+                ctx.ellipse(15, -this.height/2, 8, 20, 0.3, 0, Math.PI * 2);
+                ctx.fill();
+                
+                // 耳朵尖端（黑色）
+                ctx.fillStyle = '#8B4513';
+                ctx.beginPath();
+                ctx.ellipse(-15, -this.height/2 - 10, 5, 8, -0.3, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.beginPath();
+                ctx.ellipse(15, -this.height/2 - 10, 5, 8, 0.3, 0, Math.PI * 2);
+                ctx.fill();
+                
+                // 眼睛
+                ctx.fillStyle = '#000';
+                const eyeOffset = Math.sin(this.animFrame) * 2;
+                ctx.beginPath();
+                ctx.arc(-8, -this.height/3 + eyeOffset, 4, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.beginPath();
+                ctx.arc(8, -this.height/3 + eyeOffset, 4, 0, Math.PI * 2);
+                ctx.fill();
+                
+                // 臉頰（紅色）
+                ctx.fillStyle = '#FF6B6B';
+                ctx.beginPath();
+                ctx.arc(-18, -this.height/3 + 5, 6, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.beginPath();
+                ctx.arc(18, -this.height/3 + 5, 6, 0, Math.PI * 2);
+                ctx.fill();
+                
+                // 嘴巴
+                ctx.strokeStyle = '#000';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.arc(0, -this.height/3 + 8, 3, 0, Math.PI);
+                ctx.stroke();
+                
+                // 尾巴
+                if (this.isJumping) {
+                    ctx.fillStyle = '#FFD700';
+                    ctx.beginPath();
+                    ctx.moveTo(this.width/2 - 10, 0);
+                    ctx.lineTo(this.width/2 + 15, -10);
+                    ctx.lineTo(this.width/2 + 20, 5);
+                    ctx.lineTo(this.width/2 + 10, 15);
+                    ctx.closePath();
+                    ctx.fill();
+                    
+                    ctx.fillStyle = '#8B4513';
+                    ctx.beginPath();
+                    ctx.moveTo(this.width/2 + 15, -10);
+                    ctx.lineTo(this.width/2 + 25, -15);
+                    ctx.lineTo(this.width/2 + 20, 5);
+                    ctx.closePath();
+                    ctx.fill();
+                }
+                
+                ctx.restore();
+            }
+        }
+        
+        // 排球類別
+        class Ball {
+            constructor(x, y) {
+                this.x = x;
+                this.y = y;
+                this.vx = 0;
+                this.vy = 0;
+                this.radius = 20;
+                this.rotation = 0;
+            }
+            
+            update() {
+                this.vy += GRAVITY;
+                this.x += this.vx;
+                this.y += this.vy;
+                this.rotation += this.vx * 0.1;
+                
+                // 邊界碰撞
+                if (this.x - this.radius < 0) {
+                    this.x = this.radius;
+                    this.vx *= -BOUNCE;
+                }
+                if (this.x + this.radius > canvas.width) {
+                    this.x = canvas.width - this.radius;
+                    this.vx *= -BOUNCE;
+                }
+                
+                // 地面碰撞
+                const groundY = canvas.height - 20;
+                if (this.y + this.radius > groundY) {
+                    this.y = groundY - this.radius;
+                    this.vy *= -BOUNCE;
+                    this.vx *= 0.8;
+                    
+                    // 檢查得分
+                    if (Math.abs(this.vx) < 0.5 && Math.abs(this.vy) < 0.5) {
+                        if (this.x < canvas.width / 2) {
+                            gameState.aiScore++;
+                            addChatMessage("皮卡丘AI", "太棒了！我得分了！⚡");
+                        } else {
+                            gameState.playerScore++;
+                            addChatMessage("皮卡丘", "你做得很好！繼續加油！⚡");
+                        }
+                        this.reset();
+                        updateScore();
+                    }
+                }
+                
+                // 網子碰撞
+                const netX = canvas.width / 2 - 5;
+                const netWidth = 20;
+                const netHeight = 150; // 增加網子高度
+                const netTop = canvas.height - netHeight - 20;
+                
+                if (this.x - this.radius < netX + netWidth && this.x + this.radius > netX &&
+                    this.y + this.radius > netTop) {
+                    
+                    // 從左側撞到網子
+                    if (this.x < netX + netWidth/2) {
+                        this.x = netX - this.radius;
+                        this.vx = Math.abs(this.vx) * -BOUNCE; // 反彈向左
+                    } 
+                    // 從右側撞到網子
+                    else {
+                        this.x = netX + netWidth + this.radius;
+                        this.vx = Math.abs(this.vx) * BOUNCE;  // 反彈向右
+                    }
+                }
+            }
+            
+            reset() {
+                this.x = canvas.width / 2;
+                this.y = 100;
+                this.vx = (Math.random() - 0.5) * 6;
+                this.vy = 0;
+            }
+            
+            draw() {
+                ctx.save();
+                ctx.translate(this.x, this.y);
+                ctx.rotate(this.rotation);
+                
+                // 排球主體
+                ctx.fillStyle = '#FFF';
+                ctx.beginPath();
+                ctx.arc(0, 0, this.radius, 0, Math.PI * 2);
+                ctx.fill();
+                
+                // 排球線條
+                ctx.strokeStyle = '#000';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.moveTo(-this.radius, 0);
+                ctx.lineTo(this.radius, 0);
+                ctx.stroke();
+                
+                ctx.beginPath();
+                ctx.moveTo(0, -this.radius);
+                ctx.lineTo(0, this.radius);
+                ctx.stroke();
+                
+                ctx.beginPath();
+                ctx.arc(0, 0, this.radius * 0.7, 0, Math.PI * 2);
+                ctx.stroke();
+                
+                ctx.restore();
+            }
+        }
+        
+        // 創建遊戲對象
+        const player = new Pikachu(50, canvas.height - 100, true);
+        const aiPlayer = new Pikachu(canvas.width - 110, canvas.height - 100, false);
+        const ball = new Ball(canvas.width / 2, 100);
+        
+        // AI 行為
+        function updateAI() {
+            const ballX = ball.x;
+            const aiX = aiPlayer.x + aiPlayer.width / 2;
+            const distance = Math.abs(ballX - aiX);
+            
+            // 移動向球
+            if (distance > 30) {
+                if (ballX > aiX) {
+                    aiPlayer.moveRight();
+                } else {
+                    aiPlayer.moveLeft();
+                }
+            }
+            
+            // 跳躍邏輯
+            if (ball.y > aiPlayer.y - 50 && distance < 100 && aiPlayer.onGround) {
+                aiPlayer.jump();
+            }
+            
+            // 攻擊邏輯
+            if (distance < 80 && ball.vy > 0) {
+                aiPlayer.attack();
+            }
+        }
+        
+        // 鍵盤控制
+        const keys = {};
+        
+        document.addEventListener('keydown', (e) => {
+            keys[e.key.toLowerCase()] = true;
+            
+            if (e.key === ' ') {
+                e.preventDefault();
+                player.attack();
+            }
+        });
+        
+        document.addEventListener('keyup', (e) => {
+            keys[e.key.toLowerCase()] = false;
+        });
+        
+        function handleInput() {
+            if (keys['a']) player.moveLeft();
+            if (keys['d']) player.moveRight();
+            if (keys['w']) player.jump();
+        }
+        
+        // 繪製網子
+        function drawNet() {
+            const netX = canvas.width / 2 - 5;
+            const netHeight = 100;
+            
+            ctx.fillStyle = '#8B4513';
+            ctx.fillRect(netX, canvas.height - netHeight - 20, 10, netHeight);
+            
+            // 網格
+            ctx.strokeStyle = '#654321';
+            ctx.lineWidth = 1;
+            for (let i = 0; i < netHeight; i += 10) {
+                ctx.beginPath();
+                ctx.moveTo(netX, canvas.height - 20 - i);
+                ctx.lineTo(netX + 10, canvas.height - 20 - i);
+                ctx.stroke();
+            }
+        }
+        
+        // 繪製地面
+        function drawGround() {
+            ctx.fillStyle = '#8B4513';
+            ctx.fillRect(0, canvas.height - 20, canvas.width, 20);
+            
+            // 草地效果
+            ctx.fillStyle = '#32CD32';
+            for (let i = 0; i < canvas.width; i += 5) {
+                ctx.fillRect(i, canvas.height - 25, 3, 8);
+            }
+        }
+        
+        // 聊天系統
+        function addChatMessage(sender, message) {
+            const chatMessages = document.getElementById('chatMessages');
+            const messageDiv = document.createElement('div');
+            messageDiv.innerHTML = `<strong>${sender}:</strong> ${message}`;
+            chatMessages.appendChild(messageDiv);
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+        }
+        
+        function sendMessage() {
+            const input = document.getElementById('messageInput');
+            const message = input.value.trim();
+            
+            if (message) {
+                addChatMessage('你', message);
+                input.value = '';
+                
+                // 模擬GPT回應
+                setTimeout(() => {
+                    const responses = [
+                        "皮卡皮卡！我很喜歡和你一起打排球！⚡",
+                        "你的球技真不錯！我要更努力了！⚡",
+                        "這場比賽真刺激！我們繼續吧！⚡",
+                        "皮卡丘！你想知道什麼嗎？我可以告訴你很多事情！⚡",
+                        "排球是一項很好的運動！它能鍛鍊反應和協調能力！⚡",
+                        "我最喜歡的招式是十萬伏特！不過現在我們在打球！⚡",
+                        "你知道嗎？我其實很喜歡番茄醬！⚡",
+                        "讓我們一起努力，創造更精彩的比賽！⚡"
+                    ];
+                    
+                    const randomResponse = responses[Math.floor(Math.random() * responses.length)];
+                    addChatMessage('皮卡丘', randomResponse);
+                }, 1000);
+            }
+        }
+        
+        // 按Enter發送消息
+        document.getElementById('messageInput').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                sendMessage();
+            }
+        });
+        
+        // 更新分數顯示
+        function updateScore() {
+            document.getElementById('playerScore').textContent = gameState.playerScore;
+            document.getElementById('aiScore').textContent = gameState.aiScore;
+        }
+        
+        // 主遊戲循環
+        function gameLoop() {
+            // 清除畫布
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            // 處理輸入
+            handleInput();
+            
+            // 更新AI
+            updateAI();
+            
+            // 更新遊戲對象
+            player.update();
+            aiPlayer.update();
+            ball.update();
+            
+            // 繪製
+            drawGround();
+            drawNet();
+            player.draw();
+            aiPlayer.draw();
+            ball.draw();
+            
+            requestAnimationFrame(gameLoop);
+        }
+        
+        // 初始化
+        addChatMessage('皮卡丘', '皮卡皮卡！歡迎來到排球遊戲！讓我們一起玩吧！⚡');
+        updateScore();
+        gameLoop();
+    </script>
+</body>
+</html>
